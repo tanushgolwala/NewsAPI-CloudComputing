@@ -1,6 +1,8 @@
 package fetchcontroller
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -16,35 +18,45 @@ var topics = []string{
 	"Culture",
 }
 
-func FetchNewsFromAPI(topic string) (*http.Response, error) {
-	response, err := http.Get("https://newsapi.org/v2/everything?q=" + topic + "&apiKey=" + os.Getenv("NEWS_API_KEY"))
+func FetchNewsFromAPI(topic, apiKey string) (map[string]interface{}, error) {
+	response, err := http.Get("https://newsapi.org/v2/everything?q=" + topic + "&apiKey=" + apiKey)
 	if err != nil {
 		return nil, err
 	}
-	return response, nil
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d from NewsAPI", response.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func FetchNews(c *fiber.Ctx) error {
-	api_key := os.Getenv("NEWS_API_KEY")
-	if api_key == "" {
+	apiKey := os.Getenv("NEWS_API_KEY")
+	if apiKey == "" {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "API key not set",
 		})
 	}
 
-	var responses []*http.Response
+	results := make(map[string]interface{})
 	for _, topic := range topics {
-		res, err := FetchNewsFromAPI(topic)
+		data, err := FetchNewsFromAPI(topic, apiKey)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to fetch news for topic: " + topic,
+				"error": fmt.Sprintf("Failed to fetch news for topic %s: %v", topic, err),
 			})
 		}
-		responses = append(responses, res)
+		results[topic] = data
 	}
 
 	return c.JSON(fiber.Map{
 		"message": "News fetched successfully",
-		"data":    responses,
+		"data":    results,
 	})
 }
