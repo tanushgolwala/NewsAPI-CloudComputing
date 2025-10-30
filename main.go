@@ -14,7 +14,9 @@ func main() {
 	routers.SetupRoutes(app)
 
 	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("Hello, World!")
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"message": "Hello, World!",
+		})
 	})
 	app.Listen(":8080")
 }
