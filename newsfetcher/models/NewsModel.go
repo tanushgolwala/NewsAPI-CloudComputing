@@ -11,5 +11,6 @@ type NewsModel struct {
 	Author      string    `gorm:"type:varchar(255)" json:"author"`
 	Tags        string    `gorm:"type:varchar(255)" json:"tags"`
 	HashVal     uuid.UUID `gorm:"type:uuid" json:"hash_val"`
+	S3Url       string    `gorm:"type:text" json:"s3_url"`
 	Bias        float64   `json:"bias"`
 }
