@@ -45,3 +45,13 @@ This project delivers a cloud-native news personalization platform that stitches
 - **Resilience:** Each component is independently deployable; managed scaling and queue-based decoupling prevent single-point overloads.
 
 This architecture keeps the platform responsive for end users, streamlines operations by delegating infrastructure to cloud providers, and gives the team flexibility to iterate quickly on both product and ML models.
+
+## Architecture Diagram
+
+<img width="1721" height="1000" alt="image" src="https://github.com/user-attachments/assets/1f67d517-87ab-46d5-966b-28a66f7eb900" />
+
+
+## Timeline Diagram
+
+<img width="1735" height="742" alt="TPFFJXin4CRl-nGZ3cqY5LB13Qaja2Oj5OH0IBbmyTf3iEArjsCRHAjAVOU-OP-auzqrpQhX56ldDt--RoP7FWWAiJA5YC7PM9L8HT318Cm9xv3GIlJm2kP8tbbXz7TKCCD73tz-_OOh_1RH1vWQzmY3cOCpKPLA38j2oE08bfxBrTn1IrqB6s3dXDmZVuJ1LoI9PhW3maFtiK-s02oG7f0CUdzh1rCJjOAng-eOiCrjiQdj" src="https://github.com/user-attachments/assets/41915e03-696c-40ea-a96a-01c207fe9449" />
+
