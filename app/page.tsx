@@ -170,16 +170,7 @@ export default function Home() {
         };
 
         const topicsMap = payload.topics ?? {};
-
-        setNewsByTopic(topicsMap);
-
         const diff = calculateDiff(trimmed, baseline);
-        const snapshot: InterestSnapshot = {
-          timestamp: new Date().toISOString(),
-          topics: trimmed,
-          added: diff.added,
-          removed: diff.removed,
-        };
 
         setPreviousTopics((prev) =>
           haveSameMembers(prev, trimmed) ? prev : trimmed,
@@ -188,6 +179,29 @@ export default function Home() {
         if (!haveSameMembers(baseline, trimmed)) {
           persistLastTopics(trimmed);
         }
+
+        const totalArticles = Object.values(topicsMap).reduce(
+          (total, group) => total + (Array.isArray(group) ? group.length : 0),
+          0,
+        );
+
+        if (totalArticles === 0) {
+          setNewsByTopic({});
+          setErrorMessage(
+            "No stored stories were returned for these topics yet. Try again later.",
+          );
+          setActionMessage(null);
+          return;
+        }
+
+        setNewsByTopic(topicsMap);
+
+        const snapshot: InterestSnapshot = {
+          timestamp: new Date().toISOString(),
+          topics: trimmed,
+          added: diff.added,
+          removed: diff.removed,
+        };
 
         setInterestHistory((prev) => {
           const shouldLog =
@@ -203,11 +217,6 @@ export default function Home() {
           persistHistory(nextHistory);
           return nextHistory;
         });
-
-        const totalArticles = Object.values(topicsMap).reduce(
-          (total, group) => total + (Array.isArray(group) ? group.length : 0),
-          0,
-        );
 
         const activeTopics = Object.keys(topicsMap).filter(
           (topic) => (topicsMap[topic]?.length ?? 0) > 0,

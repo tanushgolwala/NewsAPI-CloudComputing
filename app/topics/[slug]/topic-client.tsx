@@ -44,16 +44,24 @@ export default function TopicClient({
       }
 
       const payload = (await response.json()) as { topics?: TopicNewsMap };
-      const mappedArticles = payload.topics?.[requestTopic] ?? [];
+      const rawArticles = payload.topics?.[requestTopic];
+      const mappedArticles = Array.isArray(rawArticles) ? rawArticles : [];
 
-      setArticles(Array.isArray(mappedArticles) ? mappedArticles : []);
+      if (mappedArticles.length === 0) {
+        setArticles([]);
+        setErrorMessage(
+          `No stored stories are available for ${topicLabel} right now.`,
+        );
+        setActionMessage(null);
+        return;
+      }
+
+      setArticles(mappedArticles);
 
       setActionMessage(
-        mappedArticles.length
-          ? `Loaded ${mappedArticles.length} stored stor${
-              mappedArticles.length === 1 ? "y" : "ies"
-            } for ${topicLabel}.`
-          : `No stored articles for ${topicLabel} yet.`,
+        `Loaded ${mappedArticles.length} stored stor${
+          mappedArticles.length === 1 ? "y" : "ies"
+        } for ${topicLabel}.`,
       );
     } catch (error) {
       setErrorMessage(describeError(error));
