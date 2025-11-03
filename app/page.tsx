@@ -12,7 +12,7 @@ import {
   TOPICS,
   topicToSlug,
 } from "@/lib/topics";
-import type { TopicNewsMap } from "@/types/news";
+import type { Article, TopicNewsMap } from "@/types/news";
 
 const MAX_HISTORY_ITEMS = 5;
 const HISTORY_STORAGE_KEY = "news-interest-history";
@@ -29,6 +29,12 @@ interface InterestDiff {
   added: string[];
   removed: string[];
   unchanged: string[];
+}
+
+interface ToastMessage {
+  id: number;
+  message: string;
+  tone: "add" | "remove";
 }
 
 function calculateDiff(current: string[], previous: string[]): InterestDiff {
@@ -79,6 +85,16 @@ export default function Home() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] = useState<string>("refresh");
   const hasHydrated = useRef(false);
+  const [likedArticles, setLikedArticles] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [visibleFeedCount, setVisibleFeedCount] = useState(0);
+  const feedContainerRef = useRef<HTMLDivElement | null>(null);
+  const toastTimeouts = useRef<Record<number, ReturnType<typeof setTimeout>>>(
+    {},
+  );
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const previousFeedLength = useRef(0);
 
   const diffPreview = useMemo(
     () => calculateDiff(selectedTopics, previousTopics),
@@ -92,6 +108,43 @@ export default function Home() {
     [],
   );
   const isActionInFlight = isRefreshing || isRankingBiases || isLoading;
+
+  const pushToast = useCallback(
+    (message: string, tone: ToastMessage["tone"]) => {
+      const id = Date.now() + Math.floor(Math.random() * 1_000);
+
+      setToasts((current) => [...current, { id, message, tone }]);
+
+      const timeoutId = setTimeout(() => {
+        setToasts((current) => current.filter((toast) => toast.id !== id));
+        delete toastTimeouts.current[id];
+      }, 2800);
+
+      toastTimeouts.current[id] = timeoutId;
+    },
+    [],
+  );
+
+  const getArticleKey = useCallback((topic: string, article: Article) => {
+    const candidate =
+      article.id ??
+      article.hash_val ??
+      article.s3_url ??
+      article.link ??
+      `${article.title ?? "untitled"}-${article.updated_at ?? article.created_at ?? "unknown"}`;
+
+    return `${topic.trim().toLowerCase()}::${candidate}`;
+  }, []);
+
+  useEffect(() => {
+    const registeredTimeouts = toastTimeouts.current;
+
+    return () => {
+      Object.values(registeredTimeouts).forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+    };
+  }, []);
 
   const persistHistory = useCallback((history: InterestSnapshot[]) => {
     if (typeof window === "undefined") {
@@ -236,6 +289,135 @@ export default function Home() {
     [persistHistory, persistLastTopics, previousTopics],
   );
 
+  const addTopicToSelection = useCallback(
+    (
+      topic: string,
+      options?: { triggerSync?: boolean; showToast?: boolean },
+    ) => {
+      const trimmed = topic.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      setSelectedTopics((current) => {
+        if (current.includes(trimmed)) {
+          return current;
+        }
+
+        const next = [...current, trimmed];
+
+        if (options?.showToast ?? true) {
+          pushToast(`${trimmed} added to your interests`, "add");
+        }
+
+        if (options?.triggerSync ?? true) {
+          void loadNews(next, { baselineTopics: current });
+        }
+
+        return next;
+      });
+    },
+    [loadNews, pushToast],
+  );
+
+  const removeTopicFromSelection = useCallback(
+    (
+      topic: string,
+      options?: { triggerSync?: boolean; showToast?: boolean },
+    ) => {
+      setLikedArticles((current) => {
+        if (!newsByTopic[topic]) {
+          return current;
+        }
+
+        const updated = { ...current };
+        for (const article of newsByTopic[topic] ?? []) {
+          const key = getArticleKey(topic, article);
+          if (updated[key]) {
+            delete updated[key];
+          }
+        }
+
+        return updated;
+      });
+
+      setSelectedTopics((current) => {
+        if (!current.includes(topic)) {
+          return current;
+        }
+
+        const next = current.filter((item) => item !== topic);
+
+        if (options?.showToast ?? true) {
+          pushToast(`${topic} removed from your interests`, "remove");
+        }
+
+        if (options?.triggerSync ?? true) {
+          void loadNews(next, { baselineTopics: current });
+        }
+
+        return next;
+      });
+    },
+    [getArticleKey, loadNews, newsByTopic, pushToast],
+  );
+
+  const handleArticleLikeToggle = useCallback(
+    (article: Article, topic: string) => {
+      const articleKey = getArticleKey(topic, article);
+      let shouldAddTopic = false;
+
+      setLikedArticles((current) => {
+        const alreadyLiked = current[articleKey] ?? false;
+        const nextLiked = !alreadyLiked;
+
+        const updated = { ...current };
+        if (nextLiked) {
+          updated[articleKey] = true;
+        } else {
+          delete updated[articleKey];
+        }
+
+        if (!alreadyLiked && nextLiked) {
+          shouldAddTopic = true;
+        }
+
+        return updated;
+      });
+
+      if (shouldAddTopic) {
+        addTopicToSelection(topic);
+      }
+    },
+    [addTopicToSelection, getArticleKey],
+  );
+
+  const handleArticleDismiss = useCallback(
+    (article: Article, topic: string) => {
+      const articleKey = getArticleKey(topic, article);
+
+      setLikedArticles((current) => {
+        if (!current[articleKey]) {
+          return current;
+        }
+
+        const updated = { ...current };
+        delete updated[articleKey];
+        return updated;
+      });
+
+      removeTopicFromSelection(topic);
+    },
+    [getArticleKey, removeTopicFromSelection],
+  );
+
+  const suggestedTopics = useMemo(() => {
+    return TOPICS.filter((topic) => !selectedTopics.includes(topic)).slice(
+      0,
+      8,
+    );
+  }, [selectedTopics]);
+
   const topicCards = useMemo(() => {
     const mergedTopics = Array.from(
       new Set([...selectedTopics, ...Object.keys(newsByTopic)]),
@@ -255,6 +437,92 @@ export default function Home() {
       };
     });
   }, [newsByTopic, selectedTopics]);
+
+  const feedArticles = useMemo(() => {
+    const aggregated: Array<{ topic: string; article: Article }> = [];
+
+    Object.entries(newsByTopic).forEach(([topic, articles]) => {
+      if (!Array.isArray(articles)) {
+        return;
+      }
+
+      articles.forEach((article) => {
+        aggregated.push({ topic, article });
+      });
+    });
+
+    const getTimestamp = (article: Article) => {
+      const candidate =
+        article.updated_at ?? article.created_at ?? article.created_at;
+      const parsed = candidate ? Date.parse(candidate) : NaN;
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+
+    aggregated.sort(
+      (a, b) => getTimestamp(b.article) - getTimestamp(a.article),
+    );
+
+    return aggregated;
+  }, [newsByTopic]);
+
+  const totalFeedArticles = feedArticles.length;
+
+  useEffect(() => {
+    if (totalFeedArticles === previousFeedLength.current) {
+      return;
+    }
+
+    previousFeedLength.current = totalFeedArticles;
+
+    if (totalFeedArticles === 0) {
+      setVisibleFeedCount(0);
+      return;
+    }
+
+    setVisibleFeedCount((current) => {
+      if (current === 0 || totalFeedArticles < current) {
+        return Math.min(totalFeedArticles, 8);
+      }
+
+      return current;
+    });
+  }, [totalFeedArticles]);
+
+  useEffect(() => {
+    const container = feedContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const handleScroll = () => {
+      if (
+        container.scrollTop + container.clientHeight >=
+        container.scrollHeight - 80
+      ) {
+        setVisibleFeedCount((current) => {
+          if (current >= totalFeedArticles) {
+            return current;
+          }
+
+          return Math.min(totalFeedArticles, current + 5);
+        });
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+    };
+  }, [totalFeedArticles]);
+
+  const displayedArticles = useMemo(() => {
+    if (visibleFeedCount === 0) {
+      return [];
+    }
+
+    return feedArticles.slice(0, visibleFeedCount);
+  }, [feedArticles, visibleFeedCount]);
 
   useEffect(() => {
     if (hasHydrated.current) {
@@ -312,16 +580,6 @@ export default function Home() {
       // Ignore corrupted topic cache.
     }
   }, [loadNews]);
-
-  const handleTopicToggle = (topic: string) => {
-    setSelectedTopics((current) => {
-      if (current.includes(topic)) {
-        return current.filter((item) => item !== topic);
-      }
-
-      return [...current, topic];
-    });
-  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -393,10 +651,24 @@ export default function Home() {
   }, [newsByTopic]);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#1f2937,_#0f172a_60%)] text-slate-100">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#151515,_#050505_65%)] text-zinc-100">
+      <div className="pointer-events-none fixed right-6 top-6 z-50 flex flex-col gap-3">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`rounded-2xl px-4 py-3 text-sm font-semibold shadow-lg shadow-black/40 ${
+              toast.tone === "add"
+                ? "bg-orange-500/95 text-black"
+                : "bg-rose-500/90 text-rose-50"
+            }`}
+          >
+            {toast.message}
+          </div>
+        ))}
+      </div>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-6 py-12 md:px-10 lg:px-16">
-        <header className="space-y-4 rounded-3xl bg-white/[0.03] p-8 backdrop-blur-sm md:p-12">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-4 py-1 text-xs uppercase tracking-[0.3em] text-slate-300">
+        <header className="space-y-4 rounded-3xl border border-orange-500/10 bg-black/30 p-8 shadow-lg shadow-black/40 backdrop-blur-sm md:p-12">
+          <span className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/15 px-4 py-1 text-xs uppercase tracking-[0.3em] text-orange-200">
             Curate. Queue. Discover.
           </span>
           <h1 className="text-3xl font-semibold leading-tight text-white sm:text-4xl lg:text-5xl">
@@ -421,7 +693,7 @@ export default function Home() {
                 value={selectedAction}
                 onChange={(event) => setSelectedAction(event.target.value)}
                 disabled={isActionInFlight}
-                className="rounded-full border border-white/20 bg-white/[0.08] px-4 py-2 text-sm font-medium text-white shadow-inner focus:border-white focus:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-300"
+                className="rounded-full border border-orange-500/20 bg-black/40 px-4 py-2 text-sm font-medium text-white shadow-inner focus:border-orange-400 focus:outline-none disabled:cursor-not-allowed disabled:border-orange-500/20 disabled:text-zinc-500"
               >
                 {actionOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -434,133 +706,173 @@ export default function Home() {
               type="button"
               onClick={handleActionRun}
               disabled={isActionInFlight}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-indigo-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-indigo-500/60"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-orange-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-orange-500/20 transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:bg-orange-600/70"
             >
               {isActionInFlight ? "Working…" : "Run selected action"}
             </button>
           </div>
         </header>
 
-        <div className="grid gap-8 lg:grid-cols-[340px,1fr]">
-          <form
-            onSubmit={handleSubmit}
-            className="flex h-full flex-col gap-6 rounded-3xl border border-white/10 bg-white/[0.04] p-6 shadow-xl shadow-black/20 backdrop-blur md:p-8"
+        {(errorMessage || actionMessage) && (
+          <div
+            className={`rounded-2xl border p-4 text-sm shadow-lg ${
+              errorMessage
+                ? "border-rose-400/40 bg-rose-500/10 text-rose-100"
+                : "border-orange-400/40 bg-orange-500/10 text-orange-100"
+            }`}
           >
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold text-white">
-                Choose your focus areas
+            {errorMessage ?? actionMessage}
+          </div>
+        )}
+
+        <section className="rounded-3xl border border-orange-500/10 bg-black/30 p-6 shadow-xl shadow-black/40 md:p-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold text-white">
+                Personalised headlines
               </h2>
               <p className="text-sm text-slate-300">
-                Your selections are queued to Upstash and used to fetch stored
-                stories from the news service.
+                {articlesReturned
+                  ? `Showing ${articlesReturned} articles for ${Object.keys(newsByTopic).length} topic${Object.keys(newsByTopic).length === 1 ? "" : "s"}.`
+                  : "Launch a sync to pull the latest stories for your chosen topics."}
               </p>
             </div>
+          </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              {TOPICS.map((topic) => {
-                const isSelected = selectedTopics.includes(topic);
-
-                return (
-                  <label
-                    key={topic}
-                    className={`flex cursor-pointer items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm font-medium transition ${
-                      isSelected
-                        ? "border-emerald-400/80 bg-emerald-500/10 text-emerald-200"
-                        : "border-white/10 bg-white/[0.02] text-slate-200 hover:border-white/30"
-                    }`}
-                  >
-                    <span>{topic}</span>
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => handleTopicToggle(topic)}
-                      className="h-4 w-4 rounded border-white/30 bg-transparent text-emerald-400 focus:ring-emerald-300"
-                    />
-                  </label>
-                );
-              })}
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-300">
-                Interest preview
-              </p>
-              <div className="flex flex-wrap gap-2 text-xs">
-                <div className="flex flex-wrap gap-2">
-                  {diffPreview.added.length ? (
-                    diffPreview.added.map((topic, index) => (
-                      <span
-                        key={`added-${topic}-${index}`}
-                        className="rounded-full bg-emerald-500/10 px-3 py-1 text-emerald-300"
-                      >
-                        + {topic}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="rounded-full bg-white/[0.04] px-3 py-1 text-slate-300">
-                      No new topics
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {diffPreview.removed.length ? (
-                    diffPreview.removed.map((topic, index) => (
-                      <span
-                        key={`removed-${topic}-${index}`}
-                        className="rounded-full bg-rose-500/10 px-3 py-1 text-rose-300"
-                      >
-                        – {topic}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="rounded-full bg-white/[0.04] px-3 py-1 text-slate-300">
-                      No removals
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading || selectedTopics.length === 0}
-              className="mt-auto inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 px-6 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-500/60"
-            >
-              {isLoading ? "Syncing preferences…" : "Explore personalised news"}
-            </button>
-          </form>
-
-          <div className="flex flex-col gap-6">
-            {(errorMessage || actionMessage) && (
+          <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+            <div className="flex-1 rounded-2xl border border-orange-500/10 bg-black/40 p-3 sm:p-4">
               <div
-                className={`rounded-2xl border p-4 text-sm shadow-lg ${
-                  errorMessage
-                    ? "border-rose-400/40 bg-rose-500/10 text-rose-100"
-                    : "border-emerald-400/40 bg-emerald-500/10 text-emerald-100"
-                }`}
+                ref={feedContainerRef}
+                className="flex max-h-[560px] flex-col gap-4 overflow-y-auto pr-2 sm:pr-3 lg:max-h-[70vh]"
               >
-                {errorMessage ?? actionMessage}
-              </div>
-            )}
-
-            <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 shadow-xl shadow-black/20 md:p-8">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h2 className="text-2xl font-semibold text-white">
-                    Personalised headlines
-                  </h2>
-                  <p className="text-sm text-slate-300">
+                {displayedArticles.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-orange-500/20 bg-black/40 px-6 py-12 text-center text-sm text-slate-300">
                     {articlesReturned
-                      ? `Showing ${articlesReturned} articles for ${Object.keys(newsByTopic).length} topic${Object.keys(newsByTopic).length === 1 ? "" : "s"}.`
-                      : "Launch a sync to pull the latest stories for your chosen topics."}
-                  </p>
-                </div>
-              </div>
+                      ? "Scroll the feed and start liking the stories that stand out to refine your interests."
+                      : "Sync your feed or tap a suggestion to start collecting stories."}
+                  </div>
+                ) : (
+                  displayedArticles.map(({ topic, article }) => {
+                    const articleKey = getArticleKey(topic, article);
+                    const isLiked = Boolean(likedArticles[articleKey]);
+                    const timestamp =
+                      article.updated_at ?? article.created_at ?? null;
+                    const slug = topicToSlug(topic);
+                    const articleImage =
+                      article.image_url ?? article.s3_url ?? null;
 
-              <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    return (
+                      <article
+                        key={articleKey}
+                        className="flex flex-col gap-4 rounded-2xl border border-orange-500/10 bg-black/50 p-5 shadow-lg shadow-black/40 transition hover:border-orange-400/40"
+                      >
+                        {articleImage && (
+                          <div className="overflow-hidden rounded-2xl border border-orange-500/15 bg-black/40">
+                            <div
+                              role="img"
+                              aria-label={article.title ?? topic}
+                              className="h-44 w-full bg-cover bg-center sm:h-56"
+                              style={{
+                                backgroundImage: `linear-gradient(0deg, rgba(0,0,0,0.45), rgba(0,0,0,0.45)), url(${articleImage})`,
+                              }}
+                            />
+                          </div>
+                        )}
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <span className="rounded-full border border-orange-500/20 bg-orange-500/15 px-3 py-1 text-[11px] uppercase tracking-[0.35em] text-orange-100">
+                            {topic}
+                          </span>
+                          {typeof article.bias === "number" && (
+                            <span className="rounded-full border border-orange-500/20 bg-black/45 px-3 py-1 text-[11px] text-zinc-300">
+                              Bias score {article.bias.toFixed(1)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <h3 className="text-lg font-semibold leading-tight text-white">
+                            {article.title}
+                          </h3>
+                          {article.description && (
+                            <p className="text-sm text-slate-200">
+                              {article.description}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+                          <span>
+                            Updated{" "}
+                            {timestamp ? formatTimestamp(timestamp) : "recently"}
+                          </span>
+                          {article.author && <span>By {article.author}</span>}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleArticleLikeToggle(article, topic)}
+                            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                              isLiked
+                                ? "bg-orange-500 text-black shadow-lg shadow-orange-500/30"
+                                : "bg-black/40 text-zinc-100 hover:bg-black/60"
+                            }`}
+                          >
+                            {isLiked ? "Liked" : "Like"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleArticleDismiss(article, topic)}
+                            className="inline-flex items-center gap-2 rounded-full border border-orange-500/25 bg-black/40 px-4 py-2 text-sm font-semibold text-orange-100 transition hover:border-rose-500/60 hover:bg-rose-500/15 hover:text-rose-100"
+                          >
+                            Not for me
+                          </button>
+                          {article.link && (
+                            <a
+                              href={article.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-auto inline-flex items-center gap-2 rounded-full bg-orange-600/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-500"
+                            >
+                              Read source →
+                            </a>
+                          )}
+                          {slug && (
+                            <Link
+                              href={{
+                                pathname: `/topics/${slug}`,
+                                query: { label: topic },
+                              }}
+                              className="inline-flex items-center gap-1 rounded-full border border-orange-500/25 bg-orange-500/10 px-3 py-1 text-xs font-semibold text-orange-100 transition hover:border-orange-400/60 hover:bg-orange-500/20 hover:text-white"
+                            >
+                              Open topic
+                            </Link>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+                {displayedArticles.length > 0 &&
+                  visibleFeedCount < totalFeedArticles && (
+                    <div className="sticky bottom-2 flex justify-center">
+                      <span className="rounded-full border border-orange-500/20 bg-orange-500/15 px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] text-orange-100">
+                        Keep scrolling for more
+                      </span>
+                    </div>
+                  )}
+              </div>
+            </div>
+            <div className="w-full max-w-lg space-y-3 rounded-2xl border border-orange-500/10 bg-black/35 p-4 lg:w-[240px]">
+              <div className="space-y-1.5">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.35em] text-slate-300">
+                  Topic snapshots
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Quick pulse on how each focus area is performing.
+                </p>
+              </div>
+              <div className="space-y-2.5">
                 {topicCards.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-6 py-12 text-center text-sm text-slate-300">
-                    Pick topics and sync to populate your personalised briefings.
+                  <div className="rounded-2xl border border-dashed border-orange-500/20 bg-black/40 px-4 py-6 text-sm text-slate-300">
+                    Start training your feed by liking stories you enjoy.
                   </div>
                 ) : (
                   topicCards.map((card) => {
@@ -576,16 +888,16 @@ export default function Home() {
                     return (
                       <div
                         key={card.topic}
-                        className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-5 shadow-lg shadow-black/10"
+                        className="flex flex-col gap-2.5 rounded-2xl border border-orange-500/15 bg-black/45 p-3"
                       >
-                        <div className="space-y-2">
-                          <h3 className="text-xl font-semibold text-white">
+                        <div className="space-y-1">
+                          <h4 className="text-base font-semibold text-white">
                             {card.topic}
-                          </h3>
-                          <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
+                          </h4>
+                          <p className="text-[11px] uppercase tracking-[0.35em] text-slate-400">
                             {articlesLabel}
                           </p>
-                          <p className="text-sm text-slate-300">
+                          <p className="text-xs text-slate-300">
                             {card.latestTitle
                               ? `Latest: ${card.latestTitle}`
                               : "No stored stories yet. Try refreshing sources."}
@@ -605,9 +917,9 @@ export default function Home() {
                               pathname: `/topics/${slug}`,
                               query: { label: card.topic },
                             }}
-                            className="inline-flex items-center gap-2 rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400"
+                            className="inline-flex items-center gap-2 rounded-full bg-orange-500/90 px-3 py-1 text-xs font-semibold text-black transition hover:bg-orange-400"
                           >
-                            Open briefing
+                            Dive deeper
                           </Link>
                         </div>
                       </div>
@@ -615,84 +927,207 @@ export default function Home() {
                   })
                 )}
               </div>
-            </section>
+            </div>
+          </div>
+        </section>
 
-            <section className="rounded-3xl border border-white/10 bg-white/[0.02] p-6 shadow-lg md:p-8">
-              <h2 className="text-xl font-semibold text-white">
-                Interest timeline
-              </h2>
-              <p className="text-sm text-slate-300">
-                We capture a lightweight history of preference changes so you
-                can spot emerging themes.
-              </p>
+        <form
+          onSubmit={handleSubmit}
+          className="flex w-full flex-col gap-6 rounded-3xl border border-orange-500/10 bg-black/35 p-6 shadow-xl shadow-black/40 backdrop-blur md:p-8 lg:mx-auto lg:max-w-3xl"
+        >
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold text-white">
+              Train your personalised briefing
+            </h2>
+            <p className="text-sm text-slate-300">
+              Scroll through the feed, tap like on the stories that resonate, and
+              we will keep your interest model in sync automatically.
+            </p>
+          </div>
 
-              <div className="mt-5 space-y-4">
-                {interestHistory.length === 0 && (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-5 py-10 text-center text-sm text-slate-300">
-                    Adjust your topics and sync to build an interest trail.
-                  </div>
-                )}
-
-                {interestHistory.map((entry) => (
-                  <div
-                    key={entry.timestamp}
-                    className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.04] p-5"
+          <div className="space-y-3 rounded-2xl border border-orange-500/15 bg-black/45 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-300">
+              Your interests
+            </p>
+            {selectedTopics.length ? (
+              <div className="flex flex-wrap gap-2">
+                {selectedTopics.map((topic) => (
+                  <button
+                    key={`selected-${topic}`}
+                    type="button"
+                    onClick={() => removeTopicFromSelection(topic)}
+                    className="group inline-flex items-center gap-2 rounded-full border border-orange-400/40 bg-orange-500/10 px-3 py-1 text-xs font-medium text-orange-50 transition hover:border-rose-400/50 hover:bg-rose-500/10 hover:text-rose-100"
                   >
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="text-sm font-semibold text-white">
-                        {formatTimestamp(entry.timestamp)}
-                      </p>
-                      <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                        {entry.topics.length} active topic
-                        {entry.topics.length === 1 ? "" : "s"}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      {entry.topics.map((topic, index) => (
-                        <span
-                          key={`${entry.timestamp}-${topic}-${index}`}
-                          className="rounded-full bg-white/[0.08] px-3 py-1 text-slate-200"
-                        >
-                          {topic}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-[11px]">
-                      {entry.added.length > 0 ? (
-                        entry.added.map((topic, index) => (
-                          <span
-                            key={`history-${entry.timestamp}-added-${topic}-${index}`}
-                            className="rounded-full bg-emerald-500/10 px-3 py-1 text-emerald-200"
-                          >
-                            + {topic}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="rounded-full bg-white/[0.05] px-3 py-1 text-slate-300">
-                          No new topics
-                        </span>
-                      )}
-                      {entry.removed.length > 0 ? (
-                        entry.removed.map((topic, index) => (
-                          <span
-                            key={`history-${entry.timestamp}-removed-${topic}-${index}`}
-                            className="rounded-full bg-rose-500/10 px-3 py-1 text-rose-200"
-                          >
-                            – {topic}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="rounded-full bg-white/[0.05] px-3 py-1 text-slate-300">
-                          No removals
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                    {topic}
+                    <span className="rounded-full bg-black/60 px-2 py-[2px] text-[10px] uppercase tracking-[0.25em] text-zinc-300 transition group-hover:bg-rose-500/40 group-hover:text-white">
+                      Remove
+                    </span>
+                  </button>
                 ))}
               </div>
-            </section>
+            ) : (
+              <p className="text-sm text-slate-300">
+                Start liking stories to build your personalised interest map.
+              </p>
+            )}
           </div>
-        </div>
+
+          <div className="space-y-3 rounded-2xl border border-dashed border-orange-500/25 bg-black/40 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-300">
+              Suggested signals
+            </p>
+            <p className="text-xs text-slate-400">
+              Give the model a nudge while it learns from your likes.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {suggestedTopics.length ? (
+                suggestedTopics.map((topic) => (
+                  <button
+                    key={`suggested-${topic}`}
+                    type="button"
+                    onClick={() => addTopicToSelection(topic)}
+                    className="rounded-full border border-orange-500/25 bg-black/45 px-3 py-1 text-xs font-medium text-zinc-200 transition hover:border-orange-400/60 hover:bg-orange-500/20 hover:text-white"
+                  >
+                    + {topic}
+                  </button>
+                ))
+              ) : (
+                <span className="rounded-full bg-black/40 px-3 py-1 text-xs text-zinc-400">
+                  All suggested topics are in play.
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-2xl border border-orange-500/15 bg-black/45 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-300">
+              Live interest changes
+            </p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <div className="flex flex-wrap gap-2">
+                {diffPreview.added.length ? (
+                  diffPreview.added.map((topic, index) => (
+                    <span
+                      key={`added-${topic}-${index}`}
+                      className="rounded-full border border-orange-500/30 bg-orange-500/15 px-3 py-1 text-orange-200"
+                    >
+                      + {topic}
+                    </span>
+                  ))
+                ) : (
+                  <span className="rounded-full bg-black/40 px-3 py-1 text-zinc-400">
+                    No new topics
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {diffPreview.removed.length ? (
+                  diffPreview.removed.map((topic, index) => (
+                    <span
+                      key={`removed-${topic}-${index}`}
+                      className="rounded-full border border-rose-500/30 bg-rose-500/15 px-3 py-1 text-rose-200"
+                    >
+                      – {topic}
+                    </span>
+                  ))
+                ) : (
+                  <span className="rounded-full bg-black/40 px-3 py-1 text-zinc-400">
+                    No removals
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading || selectedTopics.length === 0}
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 px-6 py-3 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:bg-orange-500/60"
+          >
+            {isLoading ? "Syncing preferences…" : "Sync feed now"}
+          </button>
+          <p className="text-xs text-slate-400">
+            We also refresh your briefing whenever you like or dismiss a story.
+          </p>
+        </form>
+
+        <section className="mx-auto w-full max-w-4xl rounded-3xl border border-orange-500/10 bg-black/30 p-5 shadow-lg shadow-black/40 md:p-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Interest timeline</h2>
+              <p className="text-xs text-slate-400">
+                Quick pulse of how your interests have shifted recently.
+              </p>
+            </div>
+            <p className="text-[10px] uppercase tracking-[0.35em] text-orange-200">
+              Last {Math.min(interestHistory.length, MAX_HISTORY_ITEMS)} updates
+            </p>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {interestHistory.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-orange-500/20 bg-black/40 px-4 py-8 text-center text-xs text-zinc-400">
+                Like or remove topics to start building your timeline.
+              </div>
+            )}
+
+            {interestHistory.map((entry) => (
+              <div
+                key={entry.timestamp}
+                className="flex flex-col gap-3 rounded-2xl border border-orange-500/15 bg-black/45 px-4 py-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-300">
+                  <span className="font-semibold text-white">
+                    {formatTimestamp(entry.timestamp)}
+                  </span>
+                  <span className="uppercase tracking-[0.35em] text-zinc-500">
+                    {entry.topics.length} topic{entry.topics.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2 text-[11px] text-zinc-200">
+                  {entry.topics.map((topic, index) => (
+                    <span
+                      key={`${entry.timestamp}-topic-${topic}-${index}`}
+                      className="rounded-full border border-orange-500/20 bg-black/50 px-2.5 py-1"
+                    >
+                      {topic}
+                    </span>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2 text-[10px]">
+                  {entry.added.length > 0 ? (
+                    entry.added.map((topic, index) => (
+                      <span
+                        key={`${entry.timestamp}-added-${topic}-${index}`}
+                        className="rounded-full border border-orange-500/30 bg-orange-500/15 px-2.5 py-[3px] text-orange-200"
+                      >
+                        + {topic}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="rounded-full bg-black/40 px-2.5 py-[3px] text-zinc-500">
+                      No additions
+                    </span>
+                  )}
+                  {entry.removed.length > 0 ? (
+                    entry.removed.map((topic, index) => (
+                      <span
+                        key={`${entry.timestamp}-removed-${topic}-${index}`}
+                        className="rounded-full border border-rose-500/30 bg-rose-500/15 px-2.5 py-[3px] text-rose-200"
+                      >
+                        – {topic}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="rounded-full bg-black/40 px-2.5 py-[3px] text-zinc-500">
+                      No removals
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   );

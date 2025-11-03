@@ -163,23 +163,23 @@ export default function TopicClient({
   }, [articles]);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#111827,_#0f172a_65%)] text-slate-100">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#151515,_#050505_65%)] text-zinc-100">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-12 md:px-10 lg:px-16">
-        <header className="space-y-6 rounded-3xl bg-white/[0.03] p-8 backdrop-blur-sm md:p-12">
+        <header className="space-y-6 rounded-3xl border border-orange-500/10 bg-black/30 p-8 shadow-lg shadow-black/40 backdrop-blur-sm md:p-12">
           <Link
             href="/"
-            className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-300 transition hover:border-white/30 hover:bg-white/10"
+            className="inline-flex w-fit items-center gap-2 rounded-full border border-orange-500/25 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-orange-100 transition hover:border-orange-400/60 hover:bg-orange-500/15"
           >
             ← Back to preferences
           </Link>
           <div className="space-y-3">
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-4 py-1 text-xs uppercase tracking-[0.3em] text-slate-300">
+            <span className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/15 px-4 py-1 text-xs uppercase tracking-[0.3em] text-orange-200">
               Topic briefing
             </span>
             <h1 className="text-3xl font-semibold leading-tight text-white sm:text-4xl">
               {topicLabel}
             </h1>
-            <p className="max-w-2xl text-sm text-slate-300 sm:text-base">
+            <p className="max-w-2xl text-sm text-zinc-300 sm:text-base">
               Review all stored articles, track bias scores, and refine your
               personalised digest for this topic.
             </p>
@@ -198,7 +198,7 @@ export default function TopicClient({
                 value={selectedAction}
                 onChange={(event) => setSelectedAction(event.target.value)}
                 disabled={isActionInFlight}
-                className="rounded-full border border-white/20 bg-white/[0.08] px-4 py-2 text-sm font-medium text-white shadow-inner focus:border-white focus:outline-none disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-300"
+                className="rounded-full border border-orange-500/20 bg-black/40 px-4 py-2 text-sm font-medium text-white shadow-inner focus:border-orange-400 focus:outline-none disabled:cursor-not-allowed disabled:border-orange-500/20 disabled:text-zinc-500"
               >
                 {actionOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -211,7 +211,7 @@ export default function TopicClient({
               type="button"
               onClick={handleActionRun}
               disabled={isActionInFlight}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-500/60"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-orange-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-orange-500/20 transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:bg-orange-600/70"
             >
               {isActionInFlight ? "Working…" : "Run selected action"}
             </button>
@@ -223,20 +223,20 @@ export default function TopicClient({
             className={`rounded-2xl border p-4 text-sm shadow-lg ${
               errorMessage
                 ? "border-rose-400/40 bg-rose-500/10 text-rose-100"
-                : "border-emerald-400/40 bg-emerald-500/10 text-emerald-100"
+                : "border-orange-400/40 bg-orange-500/10 text-orange-100"
             }`}
           >
             {errorMessage ?? actionMessage}
           </div>
         )}
 
-        <section className="space-y-4 rounded-3xl border border-white/10 bg-white/[0.02] p-6 shadow-xl shadow-black/20 md:p-8">
+        <section className="space-y-4 rounded-3xl border border-orange-500/10 bg-black/30 p-6 shadow-xl shadow-black/40 md:p-8">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h2 className="text-2xl font-semibold text-white">
                 Stored articles
               </h2>
-              <p className="text-sm text-slate-300">
+              <p className="text-sm text-zinc-300">
                 {isLoading
                   ? "Loading articles for this briefing..."
                   : articles.length
@@ -246,7 +246,7 @@ export default function TopicClient({
                   : `No stored articles found for ${topicLabel} yet.`}
               </p>
             </div>
-            <div className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-xs uppercase tracking-[0.3em] text-slate-300">
+            <div className="rounded-full border border-orange-500/20 bg-black/40 px-4 py-2 text-xs uppercase tracking-[0.3em] text-orange-100">
               Bias scored: {biasSummary.scoredCount}
               {typeof biasSummary.averageBias === "number"
                 ? ` · Avg bias ${biasSummary.averageBias.toFixed(2)}`
@@ -259,12 +259,12 @@ export default function TopicClient({
               {[...Array(4)].map((_, index) => (
                 <div
                   key={`loading-${index}`}
-                  className="h-40 animate-pulse rounded-2xl border border-white/10 bg-white/[0.04]"
+                  className="h-40 animate-pulse rounded-2xl border border-orange-500/15 bg-black/40"
                 />
               ))}
             </div>
           ) : articles.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-6 py-12 text-center text-sm text-slate-300">
+            <div className="rounded-2xl border border-dashed border-orange-500/20 bg-black/35 px-6 py-12 text-center text-sm text-zinc-300">
               Trigger a sync from the home page or use the quick actions above
               to populate this briefing.
             </div>
@@ -277,10 +277,10 @@ export default function TopicClient({
                 return (
                   <article
                     key={composedKey}
-                    className="flex h-full flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-emerald-300/40 hover:bg-white/[0.06]"
+                    className="flex h-full flex-col gap-3 rounded-2xl border border-orange-500/15 bg-black/45 p-4 transition hover:border-orange-400/60 hover:bg-black/55"
                   >
                     {article.image_url ? (
-                      <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.06]">
+                      <div className="relative overflow-hidden rounded-xl border border-orange-500/20 bg-black/40">
                         <img
                           src={article.image_url}
                           alt={article.title || "Article image"}
@@ -289,7 +289,7 @@ export default function TopicClient({
                         />
                       </div>
                     ) : (
-                      <div className="flex h-40 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      <div className="flex h-40 items-center justify-center rounded-xl border border-orange-500/20 bg-black/40 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
                         No image
                       </div>
                     )}
@@ -299,18 +299,18 @@ export default function TopicClient({
                         href={article.link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-base font-semibold text-white hover:text-emerald-200"
+                        className="text-base font-semibold text-white hover:text-orange-200"
                       >
                         {article.title}
                       </a>
                       {article.description && (
-                        <p className="text-sm text-slate-300">
+                        <p className="text-sm text-zinc-300">
                           {article.description}
                         </p>
                       )}
                     </div>
 
-                    <dl className="mt-auto grid grid-cols-2 gap-2 text-[11px] text-slate-400">
+                    <dl className="mt-auto grid grid-cols-2 gap-2 text-[11px] text-zinc-400">
                       <div>
                         <dt className="uppercase tracking-[0.2em]">Published</dt>
                         <dd>{formatTimestamp(article.created_at)}</dd>
