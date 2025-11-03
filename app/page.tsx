@@ -14,7 +14,7 @@ import {
 } from "@/lib/topics";
 import type { Article, TopicNewsMap } from "@/types/news";
 
-const MAX_HISTORY_ITEMS = 5;
+const MAX_HISTORY_ITEMS = 3;
 const HISTORY_STORAGE_KEY = "news-interest-history";
 const LAST_TOPICS_STORAGE_KEY = "news-last-topics";
 
@@ -651,14 +651,14 @@ export default function Home() {
   }, [newsByTopic]);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#151515,_#050505_65%)] text-zinc-100">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#2a2a2a,_#050505_70%)] text-zinc-100">
       <div className="pointer-events-none fixed right-6 top-6 z-50 flex flex-col gap-3">
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`rounded-2xl px-4 py-3 text-sm font-semibold shadow-lg shadow-black/40 ${
+            className={`rounded-2xl px-4 py-3 text-sm font-semibold shadow-lg shadow-black/45 ${
               toast.tone === "add"
-                ? "bg-orange-500/95 text-black"
+                ? "bg-orange-800/95 text-black"
                 : "bg-rose-500/90 text-rose-50"
             }`}
           >
@@ -667,8 +667,8 @@ export default function Home() {
         ))}
       </div>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-6 py-12 md:px-10 lg:px-16">
-        <header className="space-y-4 rounded-3xl border border-orange-500/10 bg-black/30 p-8 shadow-lg shadow-black/40 backdrop-blur-sm md:p-12">
-          <span className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/15 px-4 py-1 text-xs uppercase tracking-[0.3em] text-orange-200">
+        <header className="space-y-4 rounded-3xl border border-orange-800/15 bg-black/35 p-8 shadow-lg shadow-black/50 backdrop-blur-sm md:p-12">
+          <span className="inline-flex items-center gap-2 rounded-full border border-orange-800/30 bg-orange-800/20 px-4 py-1 text-xs uppercase tracking-[0.3em] text-orange-100">
             Curate. Queue. Discover.
           </span>
           <h1 className="text-3xl font-semibold leading-tight text-white sm:text-4xl lg:text-5xl">
@@ -693,7 +693,7 @@ export default function Home() {
                 value={selectedAction}
                 onChange={(event) => setSelectedAction(event.target.value)}
                 disabled={isActionInFlight}
-                className="rounded-full border border-orange-500/20 bg-black/40 px-4 py-2 text-sm font-medium text-white shadow-inner focus:border-orange-400 focus:outline-none disabled:cursor-not-allowed disabled:border-orange-500/20 disabled:text-zinc-500"
+                className="rounded-full border border-orange-700/25 bg-black/45 px-4 py-2 text-sm font-medium text-white shadow-inner focus:border-orange-500 focus:outline-none disabled:cursor-not-allowed disabled:border-orange-700/25 disabled:text-zinc-500"
               >
                 {actionOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -706,7 +706,7 @@ export default function Home() {
               type="button"
               onClick={handleActionRun}
               disabled={isActionInFlight}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-orange-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-orange-500/20 transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:bg-orange-600/70"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-orange-800 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-orange-900/25 transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:bg-orange-800/60"
             >
               {isActionInFlight ? "Working…" : "Run selected action"}
             </button>
@@ -718,14 +718,14 @@ export default function Home() {
             className={`rounded-2xl border p-4 text-sm shadow-lg ${
               errorMessage
                 ? "border-rose-400/40 bg-rose-500/10 text-rose-100"
-                : "border-orange-400/40 bg-orange-500/10 text-orange-100"
+                : "border-orange-800/40 bg-orange-800/10 text-orange-100"
             }`}
           >
             {errorMessage ?? actionMessage}
           </div>
         )}
 
-        <section className="rounded-3xl border border-orange-500/10 bg-black/30 p-6 shadow-xl shadow-black/40 md:p-8">
+        <section className="rounded-3xl border border-orange-800/15 bg-black/30 p-6 shadow-xl shadow-black/40 md:p-8">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h2 className="text-2xl font-semibold text-white">
@@ -740,13 +740,13 @@ export default function Home() {
           </div>
 
           <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
-            <div className="flex-1 rounded-2xl border border-orange-500/10 bg-black/40 p-3 sm:p-4">
+            <div className="flex-1 rounded-2xl border border-orange-800/15 bg-black/40 p-3 sm:p-4">
               <div
                 ref={feedContainerRef}
                 className="flex max-h-[560px] flex-col gap-4 overflow-y-auto pr-2 sm:pr-3 lg:max-h-[70vh]"
               >
                 {displayedArticles.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-orange-500/20 bg-black/40 px-6 py-12 text-center text-sm text-slate-300">
+                  <div className="rounded-2xl border border-dashed border-orange-800/25 bg-black/40 px-6 py-12 text-center text-sm text-slate-300">
                     {articlesReturned
                       ? "Scroll the feed and start liking the stories that stand out to refine your interests."
                       : "Sync your feed or tap a suggestion to start collecting stories."}
@@ -764,10 +764,10 @@ export default function Home() {
                     return (
                       <article
                         key={articleKey}
-                        className="flex flex-col gap-4 rounded-2xl border border-orange-500/10 bg-black/50 p-5 shadow-lg shadow-black/40 transition hover:border-orange-400/40"
+                        className="flex flex-col gap-4 rounded-2xl border border-orange-800/15 bg-black/50 p-5 shadow-lg shadow-black/40 transition hover:border-orange-900/40"
                       >
                         {articleImage && (
-                          <div className="overflow-hidden rounded-2xl border border-orange-500/15 bg-black/40">
+                          <div className="overflow-hidden rounded-2xl border border-orange-800/20 bg-black/40">
                             <div
                               role="img"
                               aria-label={article.title ?? topic}
@@ -779,11 +779,11 @@ export default function Home() {
                           </div>
                         )}
                         <div className="flex flex-wrap items-center justify-between gap-3">
-                          <span className="rounded-full border border-orange-500/20 bg-orange-500/15 px-3 py-1 text-[11px] uppercase tracking-[0.35em] text-orange-100">
+                          <span className="rounded-full border border-orange-800/25 bg-orange-800/20 px-3 py-1 text-[11px] uppercase tracking-[0.35em] text-orange-100">
                             {topic}
                           </span>
                           {typeof article.bias === "number" && (
-                            <span className="rounded-full border border-orange-500/20 bg-black/45 px-3 py-1 text-[11px] text-zinc-300">
+                            <span className="rounded-full border border-orange-800/25 bg-black/45 px-3 py-1 text-[11px] text-zinc-300">
                               Bias score {article.bias.toFixed(1)}
                             </span>
                           )}
@@ -811,7 +811,7 @@ export default function Home() {
                             onClick={() => handleArticleLikeToggle(article, topic)}
                             className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
                               isLiked
-                                ? "bg-orange-500 text-black shadow-lg shadow-orange-500/30"
+                                ? "bg-orange-800 text-black shadow-lg shadow-orange-900/35"
                                 : "bg-black/40 text-zinc-100 hover:bg-black/60"
                             }`}
                           >
@@ -820,7 +820,7 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => handleArticleDismiss(article, topic)}
-                            className="inline-flex items-center gap-2 rounded-full border border-orange-500/25 bg-black/40 px-4 py-2 text-sm font-semibold text-orange-100 transition hover:border-rose-500/60 hover:bg-rose-500/15 hover:text-rose-100"
+                            className="inline-flex items-center gap-2 rounded-full border border-orange-800/30 bg-black/40 px-4 py-2 text-sm font-semibold text-orange-100 transition hover:border-rose-500/60 hover:bg-rose-500/15 hover:text-rose-100"
                           >
                             Not for me
                           </button>
@@ -829,7 +829,7 @@ export default function Home() {
                               href={article.link}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="ml-auto inline-flex items-center gap-2 rounded-full bg-orange-600/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-500"
+                              className="ml-auto inline-flex items-center gap-2 rounded-full bg-orange-900/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-800"
                             >
                               Read source →
                             </a>
@@ -840,7 +840,7 @@ export default function Home() {
                                 pathname: `/topics/${slug}`,
                                 query: { label: topic },
                               }}
-                              className="inline-flex items-center gap-1 rounded-full border border-orange-500/25 bg-orange-500/10 px-3 py-1 text-xs font-semibold text-orange-100 transition hover:border-orange-400/60 hover:bg-orange-500/20 hover:text-white"
+                              className="inline-flex items-center gap-1 rounded-full border border-orange-800/30 bg-orange-800/15 px-3 py-1 text-xs font-semibold text-orange-100 transition hover:border-orange-900/60 hover:bg-orange-800/25 hover:text-white"
                             >
                               Open topic
                             </Link>
@@ -853,14 +853,14 @@ export default function Home() {
                 {displayedArticles.length > 0 &&
                   visibleFeedCount < totalFeedArticles && (
                     <div className="sticky bottom-2 flex justify-center">
-                      <span className="rounded-full border border-orange-500/20 bg-orange-500/15 px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] text-orange-100">
+                      <span className="rounded-full border border-orange-800/25 bg-orange-800/20 px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] text-orange-100">
                         Keep scrolling for more
                       </span>
                     </div>
                   )}
               </div>
             </div>
-            <div className="w-full max-w-lg space-y-3 rounded-2xl border border-orange-500/10 bg-black/35 p-4 lg:w-[240px]">
+            <div className="w-full max-w-lg space-y-3 rounded-2xl border border-orange-800/15 bg-black/35 p-4 lg:w-[240px]">
               <div className="space-y-1.5">
                 <h3 className="text-sm font-semibold uppercase tracking-[0.35em] text-slate-300">
                   Topic snapshots
@@ -871,7 +871,7 @@ export default function Home() {
               </div>
               <div className="space-y-2.5">
                 {topicCards.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-orange-500/20 bg-black/40 px-4 py-6 text-sm text-slate-300">
+                  <div className="rounded-2xl border border-dashed border-orange-800/25 bg-black/40 px-4 py-6 text-sm text-slate-300">
                     Start training your feed by liking stories you enjoy.
                   </div>
                 ) : (
@@ -888,7 +888,7 @@ export default function Home() {
                     return (
                       <div
                         key={card.topic}
-                        className="flex flex-col gap-2.5 rounded-2xl border border-orange-500/15 bg-black/45 p-3"
+                        className="flex flex-col gap-2.5 rounded-2xl border border-orange-800/20 bg-black/45 p-3"
                       >
                         <div className="space-y-1">
                           <h4 className="text-base font-semibold text-white">
@@ -917,7 +917,7 @@ export default function Home() {
                               pathname: `/topics/${slug}`,
                               query: { label: card.topic },
                             }}
-                            className="inline-flex items-center gap-2 rounded-full bg-orange-500/90 px-3 py-1 text-xs font-semibold text-black transition hover:bg-orange-400"
+                            className="inline-flex items-center gap-2 rounded-full bg-orange-900/90 px-3 py-1 text-xs font-semibold text-black transition hover:bg-orange-900"
                           >
                             Dive deeper
                           </Link>
@@ -933,7 +933,7 @@ export default function Home() {
 
         <form
           onSubmit={handleSubmit}
-          className="flex w-full flex-col gap-6 rounded-3xl border border-orange-500/10 bg-black/35 p-6 shadow-xl shadow-black/40 backdrop-blur md:p-8 lg:mx-auto lg:max-w-3xl"
+          className="flex w-full flex-col gap-6 rounded-3xl border border-orange-800/15 bg-black/35 p-6 shadow-xl shadow-black/40 backdrop-blur md:p-8 lg:mx-auto lg:max-w-3xl"
         >
           <div className="space-y-4">
             <h2 className="text-xl font-semibold text-white">
@@ -945,7 +945,7 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="space-y-3 rounded-2xl border border-orange-500/15 bg-black/45 p-4">
+          <div className="space-y-3 rounded-2xl border border-orange-800/20 bg-black/45 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-300">
               Your interests
             </p>
@@ -956,7 +956,7 @@ export default function Home() {
                     key={`selected-${topic}`}
                     type="button"
                     onClick={() => removeTopicFromSelection(topic)}
-                    className="group inline-flex items-center gap-2 rounded-full border border-orange-400/40 bg-orange-500/10 px-3 py-1 text-xs font-medium text-orange-50 transition hover:border-rose-400/50 hover:bg-rose-500/10 hover:text-rose-100"
+                    className="group inline-flex items-center gap-2 rounded-full border border-orange-900/40 bg-orange-800/15 px-3 py-1 text-xs font-medium text-orange-100 transition hover:border-rose-400/50 hover:bg-rose-500/10 hover:text-rose-100"
                   >
                     {topic}
                     <span className="rounded-full bg-black/60 px-2 py-[2px] text-[10px] uppercase tracking-[0.25em] text-zinc-300 transition group-hover:bg-rose-500/40 group-hover:text-white">
@@ -972,7 +972,7 @@ export default function Home() {
             )}
           </div>
 
-          <div className="space-y-3 rounded-2xl border border-dashed border-orange-500/25 bg-black/40 p-4">
+          <div className="space-y-3 rounded-2xl border border-dashed border-orange-800/30 bg-black/40 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-300">
               Suggested signals
             </p>
@@ -986,7 +986,7 @@ export default function Home() {
                     key={`suggested-${topic}`}
                     type="button"
                     onClick={() => addTopicToSelection(topic)}
-                    className="rounded-full border border-orange-500/25 bg-black/45 px-3 py-1 text-xs font-medium text-zinc-200 transition hover:border-orange-400/60 hover:bg-orange-500/20 hover:text-white"
+                    className="rounded-full border border-orange-800/30 bg-black/45 px-3 py-1 text-xs font-medium text-zinc-200 transition hover:border-orange-900/60 hover:bg-orange-800/25 hover:text-white"
                   >
                     + {topic}
                   </button>
@@ -999,7 +999,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="space-y-3 rounded-2xl border border-orange-500/15 bg-black/45 p-4">
+          <div className="space-y-3 rounded-2xl border border-orange-800/20 bg-black/45 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-300">
               Live interest changes
             </p>
@@ -1009,7 +1009,7 @@ export default function Home() {
                   diffPreview.added.map((topic, index) => (
                     <span
                       key={`added-${topic}-${index}`}
-                      className="rounded-full border border-orange-500/30 bg-orange-500/15 px-3 py-1 text-orange-200"
+                      className="rounded-full border border-orange-800/35 bg-orange-800/20 px-3 py-1 text-orange-200"
                     >
                       + {topic}
                     </span>
@@ -1042,7 +1042,7 @@ export default function Home() {
           <button
             type="submit"
             disabled={isLoading || selectedTopics.length === 0}
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 px-6 py-3 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:bg-orange-500/60"
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-orange-800 px-6 py-3 text-sm font-semibold text-black transition hover:bg-orange-900 disabled:cursor-not-allowed disabled:bg-orange-800/60"
           >
             {isLoading ? "Syncing preferences…" : "Sync feed now"}
           </button>
@@ -1051,7 +1051,7 @@ export default function Home() {
           </p>
         </form>
 
-        <section className="mx-auto w-full max-w-4xl rounded-3xl border border-orange-500/10 bg-black/30 p-5 shadow-lg shadow-black/40 md:p-6">
+        <section className="mx-auto w-full max-w-4xl rounded-3xl border border-orange-800/15 bg-black/30 p-5 shadow-lg shadow-black/40 md:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-white">Interest timeline</h2>
@@ -1066,7 +1066,7 @@ export default function Home() {
 
           <div className="mt-4 space-y-3">
             {interestHistory.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-orange-500/20 bg-black/40 px-4 py-8 text-center text-xs text-zinc-400">
+              <div className="rounded-2xl border border-dashed border-orange-800/25 bg-black/40 px-4 py-8 text-center text-xs text-zinc-400">
                 Like or remove topics to start building your timeline.
               </div>
             )}
@@ -1074,7 +1074,7 @@ export default function Home() {
             {interestHistory.map((entry) => (
               <div
                 key={entry.timestamp}
-                className="flex flex-col gap-3 rounded-2xl border border-orange-500/15 bg-black/45 px-4 py-4"
+                className="flex flex-col gap-3 rounded-2xl border border-orange-800/20 bg-black/45 px-4 py-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-300">
                   <span className="font-semibold text-white">
@@ -1088,7 +1088,7 @@ export default function Home() {
                   {entry.topics.map((topic, index) => (
                     <span
                       key={`${entry.timestamp}-topic-${topic}-${index}`}
-                      className="rounded-full border border-orange-500/20 bg-black/50 px-2.5 py-1"
+                      className="rounded-full border border-orange-800/25 bg-black/50 px-2.5 py-1"
                     >
                       {topic}
                     </span>
@@ -1099,7 +1099,7 @@ export default function Home() {
                     entry.added.map((topic, index) => (
                       <span
                         key={`${entry.timestamp}-added-${topic}-${index}`}
-                        className="rounded-full border border-orange-500/30 bg-orange-500/15 px-2.5 py-[3px] text-orange-200"
+                        className="rounded-full border border-orange-800/35 bg-orange-800/20 px-2.5 py-[3px] text-orange-200"
                       >
                         + {topic}
                       </span>
