@@ -21,7 +21,7 @@ A responsive Next.js dashboard that captures viewer interests, queues topic pref
    npm run dev
    ```
 4. Open [http://localhost:3000](http://localhost:3000) to access the dashboard.
-
+`
 ### Required Environment Variables
 Set the following keys in `.env.local` (see `.env.example`):
 

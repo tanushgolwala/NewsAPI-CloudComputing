@@ -247,7 +247,7 @@ export default function TopicClient({
               </p>
             </div>
             <div className="rounded-full border border-orange-800/25 bg-black/40 px-4 py-2 text-xs uppercase tracking-[0.3em] text-orange-100">
-              Bias scored: {biasSummary.scoredCount}
+              Non Bias scored: {biasSummary.scoredCount}
               {typeof biasSummary.averageBias === "number"
                 ? ` · Avg bias ${biasSummary.averageBias.toFixed(2)}`
                 : ""}
@@ -321,7 +321,7 @@ export default function TopicClient({
                       </div>
                       <div>
                         <dt className="uppercase tracking-[0.2em]">
-                          Bias score
+                          Non Bias score
                         </dt>
                         <dd>
                           {typeof article.bias === "number"

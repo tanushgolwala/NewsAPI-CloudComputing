@@ -784,7 +784,7 @@ export default function Home() {
                           </span>
                           {typeof article.bias === "number" && (
                             <span className="rounded-full border border-orange-800/25 bg-black/45 px-3 py-1 text-[11px] text-zinc-300">
-                              Bias score {article.bias.toFixed(1)}
+                              Non Bias score {article.bias.toFixed(1)}
                             </span>
                           )}
                         </div>
