@@ -30,6 +30,25 @@ var topics = []string{
 	"Culture",
 }
 
+const (
+	defaultPresignTTL   = 24 * time.Hour
+	maxArticlesPerTopic = 5
+)
+
+type TopicSummary struct {
+	Stored  int `json:"stored"`
+	Updated int `json:"updated"`
+	Skipped int `json:"skipped"`
+}
+
+type WorkflowConfig struct {
+	APIKey      string
+	Bucket      string
+	Region      string
+	PresignTTL  time.Duration
+	MaxArticles int
+}
+
 type newsAPIResponse struct {
 	Status       string           `json:"status"`
 	TotalResults int              `json:"totalResults"`
@@ -149,215 +168,222 @@ func buildArticleText(article newsAPIArticle) string {
 	return fmt.Sprintf("Title: %s\n\nDescription: %s\n", title, description)
 }
 
-func FetchNews(c *fiber.Ctx) error {
-	apiKey := os.Getenv("NEWS_API_KEY")
-	if apiKey == "" {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "API key not set",
-		})
+func LoadWorkflowConfigFromEnv() (WorkflowConfig, error) {
+	cfg := WorkflowConfig{
+		APIKey:      strings.TrimSpace(os.Getenv("NEWS_API_KEY")),
+		Bucket:      strings.TrimSpace(os.Getenv("AWS_S3_BUCKET")),
+		Region:      strings.TrimSpace(os.Getenv("AWS_REGION")),
+		PresignTTL:  defaultPresignTTL,
+		MaxArticles: maxArticlesPerTopic,
 	}
 
-	bucket := os.Getenv("AWS_S3_BUCKET")
-	region := os.Getenv("AWS_REGION")
-	if bucket == "" || region == "" {
+	if ttlStr := strings.TrimSpace(os.Getenv("S3_PRESIGN_TTL")); ttlStr != "" {
+		if ttl, err := time.ParseDuration(ttlStr); err == nil && ttl > 0 {
+			cfg.PresignTTL = ttl
+		}
+	}
+
+	if cfg.APIKey == "" {
+		return cfg, errors.New("NEWS_API_KEY must be set")
+	}
+	if cfg.Bucket == "" || cfg.Region == "" {
+		return cfg, errors.New("AWS_S3_BUCKET and AWS_REGION must be set")
+	}
+	if cfg.MaxArticles <= 0 {
+		cfg.MaxArticles = maxArticlesPerTopic
+	}
+
+	return cfg, nil
+}
+
+func FetchTopicsWithConfig(ctx context.Context, topicList []string, cfg WorkflowConfig) (map[string]TopicSummary, error) {
+	if len(topicList) == 0 {
+		return map[string]TopicSummary{}, nil
+	}
+
+	db := initializer.Database.Db
+	if db == nil {
+		return nil, errors.New("database connection unavailable")
+	}
+
+	awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(cfg.Region))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	s3Client := s3.NewFromConfig(awsCfg)
+	presignClient := s3.NewPresignClient(s3Client)
+
+	results := make(map[string]TopicSummary)
+	for _, topic := range topicList {
+		summary, err := fetchTopic(ctx, db, s3Client, presignClient, cfg, topic)
+		if err != nil {
+			return nil, err
+		}
+		tag := strings.ToLower(strings.TrimSpace(topic))
+		if tag == "" {
+			continue
+		}
+		results[tag] = summary
+	}
+
+	return results, nil
+}
+
+func fetchTopic(ctx context.Context, db *gorm.DB, s3Client *s3.Client, presignClient *s3.PresignClient, cfg WorkflowConfig, topic string) (TopicSummary, error) {
+	var summary TopicSummary
+	trimmed := strings.TrimSpace(topic)
+	if trimmed == "" {
+		return summary, fmt.Errorf("topic cannot be empty")
+	}
+
+	topicCtx, cancelTopic := context.WithTimeout(ctx, 20*time.Second)
+	articles, err := FetchNewsFromAPI(topicCtx, trimmed, cfg.APIKey)
+	cancelTopic()
+	if err != nil {
+		return summary, fmt.Errorf("failed to fetch news for topic %s: %w", trimmed, err)
+	}
+
+	tag := strings.ToLower(trimmed)
+	for index, article := range articles {
+		if cfg.MaxArticles > 0 && index >= cfg.MaxArticles {
+			break
+		}
+
+		link := article.ArticleURL()
+		title := strings.TrimSpace(article.Title)
+		if link == "" || title == "" {
+			summary.Skipped++
+			continue
+		}
+
+		textBody := buildArticleText(article)
+
+		var existing models.NewsModel
+		err := db.WithContext(ctx).Where("link = ?", link).First(&existing).Error
+		if err == nil {
+			objectUUID := existing.HashVal
+			if objectUUID == uuid.Nil {
+				objectUUID, err = uuid.NewRandom()
+				if err != nil {
+					return summary, fmt.Errorf("failed to generate UUID for existing article on topic %s: %w", trimmed, err)
+				}
+				existing.HashVal = objectUUID
+			}
+
+			objectKey := fmt.Sprintf("%s:%s.txt", tag, objectUUID.String())
+
+			if err := uploadArticleText(ctx, s3Client, cfg.Bucket, objectKey, textBody); err != nil {
+				return summary, fmt.Errorf("failed to upload article for topic %s: %w", trimmed, err)
+			}
+
+			presigned, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+				Bucket: aws.String(cfg.Bucket),
+				Key:    aws.String(objectKey),
+			}, func(opts *s3.PresignOptions) {
+				opts.Expires = cfg.PresignTTL
+			})
+			if err != nil {
+				return summary, fmt.Errorf("failed to generate presigned URL for topic %s: %w", trimmed, err)
+			}
+
+			existing.Title = title
+			existing.Description = article.Description
+			existing.ImageURL = article.ImageLink()
+			existing.Author = article.PrimaryAuthor()
+			existing.Tags = tag
+			existing.S3Url = presigned.URL
+
+			if err := db.WithContext(ctx).Save(&existing).Error; err != nil {
+				return summary, fmt.Errorf("failed to update article for topic %s: %w", trimmed, err)
+			}
+
+			summary.Updated++
+			continue
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return summary, fmt.Errorf("db lookup failed for topic %s: %w", trimmed, err)
+		}
+
+		fileUUID, err := uuid.NewRandom()
+		if err != nil {
+			return summary, fmt.Errorf("failed to generate UUID for topic %s: %w", trimmed, err)
+		}
+
+		objectKey := fmt.Sprintf("%s:%s.txt", tag, fileUUID.String())
+
+		if err := uploadArticleText(ctx, s3Client, cfg.Bucket, objectKey, textBody); err != nil {
+			return summary, fmt.Errorf("failed to upload article for topic %s: %w", trimmed, err)
+		}
+
+		presigned, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(cfg.Bucket),
+			Key:    aws.String(objectKey),
+		}, func(opts *s3.PresignOptions) {
+			opts.Expires = cfg.PresignTTL
+		})
+		if err != nil {
+			return summary, fmt.Errorf("failed to generate presigned URL for topic %s: %w", trimmed, err)
+		}
+
+		record := models.NewsModel{
+			Title:       title,
+			Description: article.Description,
+			Link:        link,
+			ImageURL:    article.ImageLink(),
+			Author:      article.PrimaryAuthor(),
+			Tags:        tag,
+			HashVal:     fileUUID,
+			S3Url:       presigned.URL,
+			Bias:        0,
+		}
+
+		if err := db.WithContext(ctx).Create(&record).Error; err != nil {
+			if errors.Is(err, gorm.ErrDuplicatedKey) {
+				var duplicate models.NewsModel
+				if lookupErr := db.WithContext(ctx).Where("link = ?", link).First(&duplicate).Error; lookupErr != nil {
+					return summary, fmt.Errorf("failed to load existing duplicate for topic %s: %w", trimmed, lookupErr)
+				}
+
+				duplicate.Title = title
+				duplicate.Description = article.Description
+				duplicate.ImageURL = article.ImageLink()
+				duplicate.Author = article.PrimaryAuthor()
+				duplicate.Tags = tag
+				duplicate.HashVal = fileUUID
+				duplicate.S3Url = presigned.URL
+
+				if saveErr := db.WithContext(ctx).Save(&duplicate).Error; saveErr != nil {
+					return summary, fmt.Errorf("failed to update duplicate article for topic %s: %w", trimmed, saveErr)
+				}
+
+				summary.Updated++
+				continue
+			}
+			return summary, fmt.Errorf("failed to store article for topic %s: %w", trimmed, err)
+		}
+		summary.Stored++
+	}
+
+	return summary, nil
+}
+
+func FetchNews(c *fiber.Ctx) error {
+	cfg, err := LoadWorkflowConfigFromEnv()
+	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "AWS_S3_BUCKET and AWS_REGION must be set",
+			"error": err.Error(),
 		})
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	results, err := FetchTopicsWithConfig(ctx, topics, cfg)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fmt.Sprintf("Failed to load AWS config: %v", err),
+			"error": err.Error(),
 		})
-	}
-
-	s3Client := s3.NewFromConfig(cfg)
-	presignClient := s3.NewPresignClient(s3Client)
-
-	presignTTL := 24 * time.Hour
-	if ttlStr := os.Getenv("S3_PRESIGN_TTL"); ttlStr != "" {
-		if ttl, err := time.ParseDuration(ttlStr); err == nil && ttl > 0 {
-			presignTTL = ttl
-		}
-	}
-
-	db := initializer.Database.Db
-	if db == nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "database connection unavailable",
-		})
-	}
-	type topicSummary struct {
-		Stored  int `json:"stored"`
-		Updated int `json:"updated"`
-		Skipped int `json:"skipped"`
-	}
-
-	results := make(map[string]topicSummary)
-
-	for _, topic := range topics {
-		topicCtx, cancelTopic := context.WithTimeout(ctx, 20*time.Second)
-
-		tag := strings.ToLower(topic)
-		articles, err := FetchNewsFromAPI(topicCtx, topic, apiKey)
-		cancelTopic()
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": fmt.Sprintf("Failed to fetch news for topic %s: %v", topic, err),
-			})
-		}
-
-		var stored, updated, skipped int
-		for index, article := range articles {
-			if index >= 5 {
-				break
-			}
-			link := article.ArticleURL()
-			title := strings.TrimSpace(article.Title)
-			if link == "" || title == "" {
-				skipped++
-				continue
-			}
-
-			textBody := buildArticleText(article)
-
-			var existing models.NewsModel
-			err := db.WithContext(ctx).Where("link = ?", link).First(&existing).Error
-			if err == nil {
-				objectUUID := existing.HashVal
-				if objectUUID == uuid.Nil {
-					objectUUID, err = uuid.NewRandom()
-					if err != nil {
-						return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-							"error": fmt.Sprintf("Failed to generate UUID for existing article on topic %s: %v", topic, err),
-						})
-					}
-					existing.HashVal = objectUUID
-				}
-
-				objectKey := fmt.Sprintf("%s:%s.txt", tag, objectUUID.String())
-
-				if err := uploadArticleText(ctx, s3Client, bucket, objectKey, textBody); err != nil {
-					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-						"error": fmt.Sprintf("Failed to upload article for topic %s: %v", topic, err),
-					})
-				}
-
-				presigned, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
-					Bucket: aws.String(bucket),
-					Key:    aws.String(objectKey),
-				}, func(opts *s3.PresignOptions) {
-					opts.Expires = presignTTL
-				})
-				if err != nil {
-					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-						"error": fmt.Sprintf("Failed to generate presigned URL for topic %s: %v", topic, err),
-					})
-				}
-
-				existing.Title = title
-				existing.Description = article.Description
-				existing.ImageURL = article.ImageLink()
-				existing.Author = article.PrimaryAuthor()
-				existing.Tags = tag
-				existing.S3Url = presigned.URL
-
-				if err := db.WithContext(ctx).Save(&existing).Error; err != nil {
-					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-						"error": fmt.Sprintf("Failed to update article for topic %s: %v", topic, err),
-					})
-				}
-
-				updated++
-				continue
-			}
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-					"error": fmt.Sprintf("DB lookup failed for topic %s: %v", topic, err),
-				})
-			}
-
-			fileUUID, err := uuid.NewRandom()
-			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-					"error": fmt.Sprintf("Failed to generate UUID for topic %s: %v", topic, err),
-				})
-			}
-
-			objectKey := fmt.Sprintf("%s:%s.txt", tag, fileUUID.String())
-
-			if err := uploadArticleText(ctx, s3Client, bucket, objectKey, textBody); err != nil {
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-					"error": fmt.Sprintf("Failed to upload article for topic %s: %v", topic, err),
-				})
-			}
-
-			presigned, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
-				Bucket: aws.String(bucket),
-				Key:    aws.String(objectKey),
-			}, func(opts *s3.PresignOptions) {
-				opts.Expires = presignTTL
-			})
-			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-					"error": fmt.Sprintf("Failed to generate presigned URL for topic %s: %v", topic, err),
-				})
-			}
-
-			record := models.NewsModel{
-				Title:       title,
-				Description: article.Description,
-				Link:        link,
-				ImageURL:    article.ImageLink(),
-				Author:      article.PrimaryAuthor(),
-				Tags:        tag,
-				HashVal:     fileUUID,
-				S3Url:       presigned.URL,
-				Bias:        0,
-			}
-
-			if err := db.WithContext(ctx).Create(&record).Error; err != nil {
-				if errors.Is(err, gorm.ErrDuplicatedKey) {
-					var duplicate models.NewsModel
-					if lookupErr := db.WithContext(ctx).Where("link = ?", link).First(&duplicate).Error; lookupErr != nil {
-						return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-							"error": fmt.Sprintf("Failed to load existing duplicate for topic %s: %v", topic, lookupErr),
-						})
-					}
-
-					duplicate.Title = title
-					duplicate.Description = article.Description
-					duplicate.ImageURL = article.ImageLink()
-					duplicate.Author = article.PrimaryAuthor()
-					duplicate.Tags = tag
-					duplicate.HashVal = fileUUID
-					duplicate.S3Url = presigned.URL
-
-					if saveErr := db.WithContext(ctx).Save(&duplicate).Error; saveErr != nil {
-						return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-							"error": fmt.Sprintf("Failed to update duplicate article for topic %s: %v", topic, saveErr),
-						})
-					}
-
-					updated++
-					continue
-				}
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-					"error": fmt.Sprintf("Failed to store article for topic %s: %v", topic, err),
-				})
-			}
-			stored++
-		}
-
-		results[tag] = topicSummary{
-			Stored:  stored,
-			Updated: updated,
-			Skipped: skipped,
-		}
 	}
 
 	return c.JSON(fiber.Map{

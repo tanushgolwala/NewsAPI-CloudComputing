@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,161 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 )
+
+const defaultHuggingFaceURL = "https://m6rebwzf26vlh38c.us-east-1.aws.endpoints.huggingface.cloud"
+
+type BiasConfig struct {
+	APIToken string
+	APIURL   string
+}
+
+type BiasProcessingResult struct {
+	Updated  int
+	Failed   int
+	Total    int
+	Failures []map[string]interface{}
+}
+
+type InferenceError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *InferenceError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	return fmt.Sprintf("huggingface returned status %d", e.StatusCode)
+}
+
+func (e *InferenceError) Retryable() bool {
+	if e == nil {
+		return false
+	}
+	return e.StatusCode >= 500 && e.StatusCode < 600
+}
+
+func LoadBiasConfigFromEnv() (BiasConfig, error) {
+	token := strings.TrimSpace(os.Getenv("HF_TOKEN"))
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("HUGGINGFACE_API_TOKEN"))
+	}
+
+	apiURL := strings.TrimSpace(os.Getenv("HUGGINGFACE_ENDPOINT_URL"))
+	if apiURL == "" {
+		apiURL = strings.TrimSpace(os.Getenv("HUGGINGFACE_MODEL_URL"))
+	}
+	if apiURL == "" {
+		apiURL = defaultHuggingFaceURL
+	}
+
+	if token == "" {
+		return BiasConfig{}, errors.New("HF_TOKEN or HUGGINGFACE_API_TOKEN must be set")
+	}
+
+	return BiasConfig{
+		APIToken: token,
+		APIURL:   apiURL,
+	}, nil
+}
+
+func ProcessBiasForArticles(ctx context.Context, articles []models.NewsModel, cfg BiasConfig) (BiasProcessingResult, error) {
+	result := BiasProcessingResult{
+		Total:    len(articles),
+		Failures: make([]map[string]interface{}, 0),
+	}
+
+	db := initializer.Database.Db
+	if db == nil {
+		return result, errors.New("database connection unavailable")
+	}
+
+	if len(articles) == 0 {
+		log.Printf("No articles provided for bias scoring")
+		return result, nil
+	}
+
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	log.Printf("Starting bias scoring for %d articles", len(articles))
+
+	for _, article := range articles {
+		log.Printf("Processing article %s: %s", article.ID.String(), strings.TrimSpace(article.Title))
+		if strings.TrimSpace(article.S3Url) == "" {
+			result.Failed++
+			failure := map[string]interface{}{
+				"id":     article.ID.String(),
+				"title":  article.Title,
+				"reason": "missing s3 url",
+			}
+			result.Failures = append(result.Failures, failure)
+			log.Printf("Skipping article %s due to missing S3 URL", article.ID.String())
+			continue
+		}
+
+		description, err := downloadArticleText(ctx, httpClient, article.S3Url)
+		if err != nil {
+			result.Failed++
+			failure := map[string]interface{}{
+				"id":     article.ID.String(),
+				"title":  article.Title,
+				"reason": fmt.Sprintf("download failed: %v", err),
+			}
+			result.Failures = append(result.Failures, failure)
+			log.Printf("Failed to download article %s: %v", article.ID.String(), err)
+			continue
+		}
+
+		if description == "" {
+			result.Failed++
+			failure := map[string]interface{}{
+				"id":     article.ID.String(),
+				"title":  article.Title,
+				"reason": "description is empty",
+			}
+			result.Failures = append(result.Failures, failure)
+			log.Printf("Article %s has an empty description after parsing; skipping", article.ID.String())
+			continue
+		}
+
+		score, err := invokeBiasWithRetry(ctx, httpClient, cfg, description)
+		if err != nil {
+			result.Failed++
+			failure := map[string]interface{}{
+				"id":     article.ID.String(),
+				"title":  article.Title,
+				"reason": fmt.Sprintf("huggingface invocation failed: %v", err),
+			}
+			result.Failures = append(result.Failures, failure)
+			log.Printf("Hugging Face inference failed for article %s: %v", article.ID.String(), err)
+			continue
+		}
+
+		if err := db.WithContext(ctx).Model(&models.NewsModel{}).Where("id = ?", article.ID).Update("bias", score).Error; err != nil {
+			result.Failed++
+			failure := map[string]interface{}{
+				"id":     article.ID.String(),
+				"title":  article.Title,
+				"reason": fmt.Sprintf("failed to update bias: %v", err),
+			}
+			result.Failures = append(result.Failures, failure)
+			log.Printf("Failed to update bias score for article %s: %v", article.ID.String(), err)
+			continue
+		}
+
+		result.Updated++
+		log.Printf("Updated bias score for article %s to %.4f", article.ID.String(), score)
+	}
+
+	log.Printf("Bias scoring complete: updated=%d failed=%d total=%d", result.Updated, result.Failed, result.Total)
+
+	return result, nil
+}
 
 func GetBiasScores(c *fiber.Ctx) error {
 	db := initializer.Database.Db
@@ -43,28 +199,11 @@ func GetBiasScores(c *fiber.Ctx) error {
 		}
 		limit = parsed
 	}
-
-	apiToken := strings.TrimSpace(os.Getenv("HF_TOKEN"))
-	if apiToken == "" {
-		apiToken = strings.TrimSpace(os.Getenv("HUGGINGFACE_API_TOKEN"))
-	}
-
-	apiURL := strings.TrimSpace(os.Getenv("HUGGINGFACE_ENDPOINT_URL"))
-	if apiURL == "" {
-		apiURL = strings.TrimSpace(os.Getenv("HUGGINGFACE_MODEL_URL"))
-	}
-	if apiURL == "" {
-		apiURL = "https://m6rebwzf26vlh38c.us-east-1.aws.endpoints.huggingface.cloud"
-	}
-
-	if apiToken == "" {
+	cfg, err := LoadBiasConfigFromEnv()
+	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "HF_TOKEN or HUGGINGFACE_API_TOKEN must be set",
+			"error": err.Error(),
 		})
-	}
-
-	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
 	}
 
 	var articles []models.NewsModel
@@ -82,8 +221,6 @@ func GetBiasScores(c *fiber.Ctx) error {
 		})
 	}
 
-	log.Printf("Starting bias scoring for %d articles (force=%t limit=%d)", len(articles), forceRefresh, limit)
-
 	if len(articles) == 0 {
 		log.Printf("No articles available for bias scoring")
 		return c.JSON(fiber.Map{
@@ -93,81 +230,21 @@ func GetBiasScores(c *fiber.Ctx) error {
 		})
 	}
 
-	updated := 0
-	failed := 0
-	failures := make([]map[string]interface{}, 0)
+	log.Printf("Starting bias scoring for %d articles (force=%t limit=%d)", len(articles), forceRefresh, limit)
 
-	for _, article := range articles {
-		log.Printf("Processing article %s: %s", article.ID.String(), strings.TrimSpace(article.Title))
-		if strings.TrimSpace(article.S3Url) == "" {
-			failed++
-			failures = append(failures, map[string]interface{}{
-				"id":     article.ID.String(),
-				"title":  article.Title,
-				"reason": "missing s3 url",
-			})
-			log.Printf("Skipping article %s due to missing S3 URL", article.ID.String())
-			continue
-		}
-
-		description, err := downloadArticleText(ctx, httpClient, article.S3Url)
-		if err != nil {
-			failed++
-			failures = append(failures, map[string]interface{}{
-				"id":     article.ID.String(),
-				"title":  article.Title,
-				"reason": fmt.Sprintf("download failed: %v", err),
-			})
-			log.Printf("Failed to download article %s: %v", article.ID.String(), err)
-			continue
-		}
-
-		if description == "" {
-			failed++
-			failures = append(failures, map[string]interface{}{
-				"id":     article.ID.String(),
-				"title":  article.Title,
-				"reason": "description is empty",
-			})
-			log.Printf("Article %s has an empty description after parsing; skipping", article.ID.String())
-			continue
-		}
-
-		score, err := invokeBiasEndpoint(ctx, httpClient, apiURL, apiToken, description)
-		if err != nil {
-			failed++
-			failures = append(failures, map[string]interface{}{
-				"id":     article.ID.String(),
-				"title":  article.Title,
-				"reason": fmt.Sprintf("huggingface invocation failed: %v", err),
-			})
-			log.Printf("Hugging Face inference failed for article %s: %v", article.ID.String(), err)
-			continue
-		}
-
-		if err := db.WithContext(ctx).Model(&models.NewsModel{}).Where("id = ?", article.ID).Update("bias", score).Error; err != nil {
-			failed++
-			failures = append(failures, map[string]interface{}{
-				"id":     article.ID.String(),
-				"title":  article.Title,
-				"reason": fmt.Sprintf("failed to update bias: %v", err),
-			})
-			log.Printf("Failed to update bias score for article %s: %v", article.ID.String(), err)
-			continue
-		}
-
-		updated++
-		log.Printf("Updated bias score for article %s to %.4f", article.ID.String(), score)
+	result, err := ProcessBiasForArticles(ctx, articles, cfg)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fmt.Sprintf("failed to process bias scores: %v", err),
+		})
 	}
-
-	log.Printf("Bias scoring complete: updated=%d failed=%d total=%d", updated, failed, len(articles))
 
 	return c.JSON(fiber.Map{
 		"message":      "bias scores processed",
-		"updated":      updated,
-		"failed":       failed,
-		"total":        len(articles),
-		"failed_items": failures,
+		"updated":      result.Updated,
+		"failed":       result.Failed,
+		"total":        result.Total,
+		"failed_items": result.Failures,
 	})
 }
 
@@ -215,6 +292,34 @@ func extractDescription(body []byte) string {
 	return strings.TrimSpace(desc)
 }
 
+func invokeBiasWithRetry(ctx context.Context, client *http.Client, cfg BiasConfig, description string) (float64, error) {
+	const maxAttempts = 3
+	backoff := time.Second
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		score, err := invokeBiasEndpoint(ctx, client, cfg.APIURL, cfg.APIToken, description)
+		if err == nil {
+			return score, nil
+		}
+
+		var infErr *InferenceError
+		if errors.As(err, &infErr) && infErr.Retryable() && attempt < maxAttempts {
+			wait := backoff * time.Duration(1<<(attempt-1))
+			log.Printf("Retrying Hugging Face request (attempt %d/%d) after %s due to status %d", attempt+1, maxAttempts, wait, infErr.StatusCode)
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
+			continue
+		}
+
+		return 0, err
+	}
+
+	return 0, fmt.Errorf("failed to invoke Hugging Face after %d attempts", maxAttempts)
+}
+
 func invokeBiasEndpoint(ctx context.Context, client *http.Client, apiURL, token string, description string) (float64, error) {
 	requestBody := map[string]interface{}{
 		"inputs":     description,
@@ -236,6 +341,8 @@ func invokeBiasEndpoint(ctx context.Context, client *http.Client, apiURL, token 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	// Ensure Inference Endpoints wait for the model to spin up instead of returning 503 immediately when cold-starting.
+	req.Header.Set("X-Wait-For-Model", "true")
 
 	log.Printf("Sending description (%d chars) to Hugging Face endpoint %s", len(description), apiURL)
 
@@ -256,7 +363,10 @@ func invokeBiasEndpoint(ctx context.Context, client *http.Client, apiURL, token 
 		snippet := logResponseSnippet(responseBody)
 		log.Printf("Hugging Face returned status %d with body: %s", resp.StatusCode, snippet)
 
-		return 0, fmt.Errorf("huggingface returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		return 0, &InferenceError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("huggingface returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody))),
+		}
 	}
 
 	snippet := logResponseSnippet(responseBody)

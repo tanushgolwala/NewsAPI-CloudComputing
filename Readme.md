@@ -31,30 +31,29 @@
   {
     "topics": {
       "Technology": [
-        {
-          "id": "uuid",
-          "created_at": "timestamp",
-          "updated_at": "timestamp",
-          "deleted_at": null,
-          "is_activated": true,
-          "title": "Example headline",
-          "description": "Story summary",
-          "link": "https://example.com/news",
-          "image_url": "https://example.com/thumbnail.jpg",
-          "author": "Reporter Name",
-          "tags": "technology",
-          "hash_val": "uuid",
-          "s3_url": "https://signed-s3-url",
-          "bias": 0
-        }
-      ]
-    }
+      {
+        "id": "uuid",
+        "created_at": "timestamp",
+        "updated_at": "timestamp",
+        "deleted_at": null,
+        "title": "Example headline",
+        "description": "Story summary",
+        "link": "https://example.com/news",
+        "image_url": "https://example.com/thumbnail.jpg",
+        "author": "Reporter Name",
+        "tags": "technology",
+        "hash_val": "uuid",
+        "s3_url": "https://signed-s3-url",
+        "bias": 0
+      }
+    ]
+  }
   }
   ```
 - **Error Response:** `{"error": "No topics provided"}` (message varies by failure).
 
 ### GET `/rank-biases`
-- **Description:** Downloads article text from S3, invokes the configured SageMaker endpoint to compute bias scores, and updates stored articles.
+- **Description:** Downloads article text from S3, invokes the configured Hugging Face Inference Endpoint to compute bias scores, and updates stored articles.
 - **Request:** No body required.
 - **Successful Response:**
   ```json
@@ -67,16 +66,53 @@
       {
         "id": "uuid",
         "title": "Example headline",
-        "reason": "sagemaker invocation failed: error details"
+        "reason": "huggingface invocation failed: error details"
       }
     ]
   }
   ```
-- **Error Response:** `{"error": "AWS_REGION and SAGEMAKER_ENDPOINT_NAME must be set"}` (message varies by failure).
+- **Error Response:** `{"error": "HF_TOKEN or HUGGINGFACE_API_TOKEN must be set"}` (message varies by failure).
+
+### GET/POST `/news-by-query`
+- **Description:** On-demand endpoint that accepts an arbitrary topic, fetches fresh articles for it, stores the content in S3/DB, scores each article for bias, and immediately returns the enriched articles.
+- **Request:**
+  - Query parameter: `/news-by-query?query=renewable energy`
+  - or JSON body:
+    ```json
+    {
+      "query": "renewable energy"
+    }
+    ```
+- **Successful Response:**
+  ```json
+  {
+    "topics": {
+      "renewable energy": [
+      {
+        "id": "uuid",
+        "created_at": "timestamp",
+        "updated_at": "timestamp",
+        "deleted_at": null,
+        "title": "Grid-scale storage breakthrough",
+        "description": "Story summary",
+        "link": "https://example.com/news",
+        "image_url": "https://example.com/thumbnail.jpg",
+        "author": "Reporter Name",
+        "tags": "renewable energy",
+        "hash_val": "uuid",
+        "s3_url": "https://signed-s3-url",
+        "bias": -0.21
+      }
+    ]
+  }
+  }
+  ```
+- **Error Responses:** `{"error": "query parameter is required"}` if no topic is provided, or `{"error": "failed to score bias for all articles", "details": [...]}` if Hugging Face inference fails for one or more items.
 
 ## Required Environment Variables
 - `DB_URL`: PostgreSQL connection string used during application startup and by all endpoints.
 - `NEWS_API_KEY`: API key for the external news provider, required by `GET /fetch-news`.
-- `AWS_REGION`: AWS region for S3 and SageMaker interactions, required by `GET /fetch-news` and `GET /rank-biases`.
+- `AWS_REGION`: AWS region used for all S3 interactions (uploading article text and generating presigned URLs), required by `/fetch-news`, `/rank-biases`, and `/news-by-query`.
 - `AWS_S3_BUCKET`: S3 bucket name where article summaries are stored, required by `GET /fetch-news`.
-- `SAGEMAKER_ENDPOINT_NAME`: Deployed SageMaker endpoint identifier used for bias scoring, required by `GET /rank-biases`.
+- `HF_TOKEN` or `HUGGINGFACE_API_TOKEN`: Hugging Face access token used for all bias-scoring requests (`GET /rank-biases` and `/news-by-query`).
+- `HUGGINGFACE_ENDPOINT_URL` (or `HUGGINGFACE_MODEL_URL`): Optional override for the Hugging Face Inference Endpoint URL; defaults to the deployed endpoint baked into the binary.
