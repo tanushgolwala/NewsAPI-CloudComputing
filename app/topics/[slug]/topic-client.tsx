@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import BiasLegend from "@/components/bias-legend";
+import { isBiasFlagged } from "@/lib/bias";
 import {
   describeError,
   formatTimestamp,
@@ -254,6 +256,8 @@ export default function TopicClient({
             </div>
           </div>
 
+          <BiasLegend className="mt-2" />
+
           {isLoading ? (
             <div className="grid gap-4 md:grid-cols-2">
               {[...Array(4)].map((_, index) => (
@@ -273,14 +277,29 @@ export default function TopicClient({
               {articles.map((article, index) => {
                 const composedKey =
                   article.id ?? article.hash_val ?? `${requestTopic}-${index}`;
+                const isBiased = isBiasFlagged(article.bias);
+                const hasBiasScore = typeof article.bias === "number";
+                const biasDisplay = hasBiasScore
+                  ? (article.bias as number).toFixed(2)
+                  : "Pending";
 
                 return (
                   <article
                     key={composedKey}
-                    className="flex h-full flex-col gap-3 rounded-2xl border border-orange-800/20 bg-black/45 p-4 transition hover:border-orange-900/60 hover:bg-black/55"
+                    className={`flex h-full flex-col gap-3 rounded-2xl border bg-black/45 p-4 transition ${
+                      isBiased
+                        ? "border-purple-500/60 shadow-inner shadow-purple-900/20 hover:border-purple-400/80"
+                        : "border-orange-800/20 hover:border-orange-900/60 hover:bg-black/55"
+                    }`}
                   >
                     {article.image_url ? (
-                      <div className="relative overflow-hidden rounded-xl border border-orange-800/25 bg-black/40">
+                      <div
+                        className={`relative overflow-hidden rounded-xl border bg-black/40 ${
+                          isBiased
+                            ? "border-purple-500/40"
+                            : "border-orange-800/25"
+                        }`}
+                      >
                         <img
                           src={article.image_url}
                           alt={article.title || "Article image"}
@@ -289,7 +308,13 @@ export default function TopicClient({
                         />
                       </div>
                     ) : (
-                      <div className="flex h-40 items-center justify-center rounded-xl border border-orange-800/25 bg-black/40 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                      <div
+                        className={`flex h-40 items-center justify-center rounded-xl border text-xs font-semibold uppercase tracking-[0.3em] ${
+                          isBiased
+                            ? "border-purple-500/40 bg-black/45 text-purple-200"
+                            : "border-orange-800/25 bg-black/40 text-zinc-500"
+                        }`}
+                      >
                         No image
                       </div>
                     )}
@@ -299,7 +324,9 @@ export default function TopicClient({
                         href={article.link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-base font-semibold text-white hover:text-orange-100"
+                        className={`text-base font-semibold text-white transition ${
+                          isBiased ? "hover:text-purple-100" : "hover:text-orange-100"
+                        }`}
                       >
                         {article.title}
                       </a>
@@ -307,6 +334,27 @@ export default function TopicClient({
                         <p className="text-sm text-zinc-300">
                           {article.description}
                         </p>
+                      )}
+                    </div>
+
+                    <div
+                      className={`flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.3em] ${
+                        isBiased ? "text-purple-100" : "text-zinc-400"
+                      }`}
+                    >
+                      <span
+                        className={`rounded-full border px-3 py-1 ${
+                          isBiased
+                            ? "border-purple-500/50 bg-purple-500/10 text-purple-100"
+                            : "border-orange-800/25 bg-black/45 text-zinc-300"
+                        }`}
+                      >
+                        Bias {biasDisplay}
+                      </span>
+                      {isBiased && (
+                        <span className="rounded-full border border-purple-400/50 px-3 py-1 text-[0.65rem] normal-case tracking-normal text-purple-100">
+                          Flagged
+                        </span>
                       )}
                     </div>
 
@@ -320,13 +368,9 @@ export default function TopicClient({
                         <dd>{article.author ?? "Unknown"}</dd>
                       </div>
                       <div>
-                        <dt className="uppercase tracking-[0.2em]">
-                          Non Bias score
-                        </dt>
-                        <dd>
-                          {typeof article.bias === "number"
-                            ? article.bias.toFixed(2)
-                            : "Pending"}
+                        <dt className="uppercase tracking-[0.2em]">Bias score</dt>
+                        <dd className={isBiased ? "text-purple-200" : undefined}>
+                          {biasDisplay}
                         </dd>
                       </div>
                     </dl>

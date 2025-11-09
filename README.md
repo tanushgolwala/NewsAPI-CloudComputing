@@ -1,6 +1,6 @@
 ## News Intelligence Hub
 
-A responsive Next.js dashboard that captures viewer interests, queues topic preferences to Upstash Redis, and pulls curated news from your Cloud backend. The interface highlights how interests evolve over time, offers one-click refreshes, and surfaces bias scores once they are computed downstream.
+A responsive Next.js dashboard that captures viewer interests, queues topic preferences to Upstash Redis, and pulls curated news from your Cloud backend. The interface highlights how interests evolve over time, offers one-click refreshes, and surfaces bias scores once t`hey are computed downstream.
 
 ### Key Features
 - Topic picker with live diffing between the current and last synced interests, plus a quick-actions dropdown for refresh and bias ranking.

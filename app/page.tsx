@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import BiasLegend from "@/components/bias-legend";
+import { isBiasFlagged } from "@/lib/bias";
 import {
   describeError,
   formatTimestamp,
@@ -680,7 +682,7 @@ export default function Home() {
             backend. Track how your interests evolve over time and surface fresh
             insights on demand.
           </p>
-          <div className="flex flex-col gap-4 pt-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-4 pt-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="flex flex-wrap items-center gap-3">
               <label
                 htmlFor="action-selector"
@@ -710,6 +712,12 @@ export default function Home() {
             >
               {isActionInFlight ? "Working…" : "Run selected action"}
             </button>
+            <Link
+              href="/news-by-query"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-orange-800/30 bg-orange-800/10 px-5 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-orange-100 transition hover:border-orange-700 hover:bg-orange-800/25"
+            >
+              Query any topic ↗
+            </Link>
           </div>
         </header>
 
@@ -739,6 +747,8 @@ export default function Home() {
             </div>
           </div>
 
+          <BiasLegend className="mt-4" />
+
           <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
             <div className="flex-1 rounded-2xl border border-orange-800/15 bg-black/40 p-3 sm:p-4">
               <div
@@ -760,14 +770,25 @@ export default function Home() {
                     const slug = topicToSlug(topic);
                     const articleImage =
                       article.image_url ?? article.s3_url ?? null;
+                    const isBiased = isBiasFlagged(article.bias);
 
                     return (
                       <article
                         key={articleKey}
-                        className="flex flex-col gap-4 rounded-2xl border border-orange-800/15 bg-black/50 p-5 shadow-lg shadow-black/40 transition hover:border-orange-900/40"
+                        className={`flex flex-col gap-4 rounded-2xl border bg-black/50 p-5 shadow-lg transition ${
+                          isBiased
+                            ? "border-purple-500/60 shadow-purple-900/30 hover:border-purple-400/80"
+                            : "border-orange-800/15 shadow-black/40 hover:border-orange-900/40"
+                        }`}
                       >
                         {articleImage && (
-                          <div className="overflow-hidden rounded-2xl border border-orange-800/20 bg-black/40">
+                          <div
+                            className={`overflow-hidden rounded-2xl border bg-black/40 ${
+                              isBiased
+                                ? "border-purple-500/40"
+                                : "border-orange-800/20"
+                            }`}
+                          >
                             <div
                               role="img"
                               aria-label={article.title ?? topic}
@@ -779,13 +800,36 @@ export default function Home() {
                           </div>
                         )}
                         <div className="flex flex-wrap items-center justify-between gap-3">
-                          <span className="rounded-full border border-orange-800/25 bg-orange-800/20 px-3 py-1 text-[11px] uppercase tracking-[0.35em] text-orange-100">
+                          <span
+                            className={`rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.35em] ${
+                              isBiased
+                                ? "border-purple-500/50 bg-purple-500/10 text-purple-100"
+                                : "border-orange-800/25 bg-orange-800/20 text-orange-100"
+                            }`}
+                          >
                             {topic}
                           </span>
                           {typeof article.bias === "number" && (
-                            <span className="rounded-full border border-orange-800/25 bg-black/45 px-3 py-1 text-[11px] text-zinc-300">
-                              Non Bias score {article.bias.toFixed(1)}
-                            </span>
+                            <div
+                              className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] ${
+                                isBiased ? "text-purple-100" : "text-zinc-300"
+                              }`}
+                            >
+                              <span
+                                className={`rounded-full border px-3 py-1 ${
+                                  isBiased
+                                    ? "border-purple-500/50 bg-purple-500/10 text-purple-100"
+                                    : "border-orange-800/25 bg-black/45 text-zinc-300"
+                                }`}
+                              >
+                                Bias {article.bias.toFixed(2)}
+                              </span>
+                              {isBiased && (
+                                <span className="rounded-full border border-purple-400/50 px-3 py-1 text-[0.65rem] normal-case tracking-normal text-purple-100">
+                                  Flagged
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                         <div className="space-y-2">
@@ -829,7 +873,11 @@ export default function Home() {
                               href={article.link}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="ml-auto inline-flex items-center gap-2 rounded-full bg-orange-900/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-800"
+                              className={`ml-auto inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-white transition ${
+                                isBiased
+                                  ? "bg-purple-700/90 hover:bg-purple-600"
+                                  : "bg-orange-900/90 hover:bg-orange-800"
+                              }`}
                             >
                               Read source →
                             </a>
